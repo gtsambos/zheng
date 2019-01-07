@@ -117,12 +117,36 @@ model {
 }
 ```
 
-## Including Plots
+## The R code
 
-You can also embed plots, for example:
+First, we need to load RStan.
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r loadpackages,echo=FALSE}
+library(rstan)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Next, we'll set values for each of the known quantities defined in the `data` chunk of the Stan script. As per Table 5.2, we have
+\begin{align*}
+J &= 8 \text{ schools }\\[1mm]
+(\bar{y_1}, \ldots, \bar{y_8} ) 
+&= (28, \ldots, 12)\\[1mm]
+(\sigma_1, \ldots, \sigma_8) 
+&= (15, \ldots, 18).
+\end{align*}
+
+```{r dataentry}
+schools_dat <- list(J = 8, 
+                    y = c(28,  8, -3,  7, -1,  1, 18, 12),
+                    sigma = c(15, 10, 16, 11,  9, 11, 10, 18))
+```
+Next let's fit the model.
+
+```{r modelfit,echo=FALSE}
+fit <- stan(file = '8schools.stan', data = schools_dat)
+```
+
+We now have an `stanfit` object. This summary of the estimated model is largely similar to the one obtained by the authors, and can be interpreted similarly. Type in `help(stanfit-class)` to see other things in this object.
+
+```{r summaryresults}
+print(fit)
+```
