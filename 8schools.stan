@@ -16,6 +16,3 @@ model {
   target += normal_lpdf(eta | 0, 1);       // prior log-density
   target += normal_lpdf(y | theta, sigma); // log-likelihood
 }
-schools_dat <- list(J = 8, 
-                    y = c(28,  8, -3,  7, -1,  1, 18, 12),
-                    sigma = c(15, 10, 16, 11,  9, 11, 10, 18))
