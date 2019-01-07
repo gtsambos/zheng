@@ -11,6 +11,26 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Ingredients in a Bayesian analysis
+
+ - **prior distribution(s)** for the unknown variable(s) $p(\theta)$.
+     - This represents our beliefs about the unknown variable *excluding* the evidence from our statistical trial.
+ - a **likelihood** for the observed data conditional on the unknowns, $p(x \mid \theta)$
+     - This represents the strength of the evidence for values of the variable based *only* on data from the trial.
+     
+Using Bayes theorem, these ingredients are combined to get a **posterior distribution** 
+\[
+p(\theta \mid x) = 
+\dfrac{p(\theta)\thinspace p(x\mid \theta)}{\int p(\theta)\thinspace p(x\mid \theta) \thinspace d\theta} \propto
+p(\theta)\thinspace p(x\mid \theta).\tag{$*$}
+\]
+
+In the Stan file, we set up the *ingredients* shown in the dotpoints above.
+
+We then use RStan to *sample from the posterior distribution* $(*)$, and to estimate quantities such as means, variances etc using this sample.
+
+
+
 ## The stan code
 
 Details of the model are encoded in a a Stan file called `8schools.stan`.
@@ -25,7 +45,7 @@ This chunk creates the variables that represent constants in the model:
  - $y_j$ is the estimated increase in SAT scores at the $j$th school, for $j = 1,\ldots, J$. From here on, I will refer to this as the 'treatment effect'.
  - $\sigma_j$ is the standard error of the estimated treatment effect, for $j = 1,\ldots, J$.
  
- Note that $\sigma_j$ is not considered a `parameter` as we are assuming that there are known constant values for $\sigma_j$ in this analysis (see the tect_.)
+ Note that $\sigma_j$ is assumed to take known constant values for $\sigma_j$ in this example.
 
 ```
 data {
@@ -36,7 +56,7 @@ data {
 ```
 #### Parameters
 
-This chunk defines the unknown variables in this analysis that we wish the estimate. These are:
+This chunk defines the parameters with unknown values that we wish to estimate in this analysis. These are:
 
  - $\mu \in \mathbb{R}$, the treatment effect across schools
  - $\tau$, the standard deviation in treatment effects across schools
@@ -69,7 +89,10 @@ transformed parameters {
 
 #### Model
 
-This chunk defines the distributions of the parameters in the model that were in `parameters`.
+This chunk defines the distributions of the parameters in the model that were in `parameters`. In particular, we specify the two main ingredients of a Bayesian analysis:
+
+ - the *prior* distributions $p(\theta_j)$
+ - the likelihood $p(y_1, \ldots, y_n \mid | theta, \mu, \tau)$
 
  - As per eqn (5.14) in BDA3, the school-specific effect estimates $\theta_j$ are assumed to be independent draws from a normal distribution with mean $\mu$ and standard deviation $\tau$:
 \[
@@ -103,12 +126,6 @@ However, from (1) and (BDA.14), each $\theta_j$ is simply a transformed version 
 Note that these statements are coded in a more concise, vectorised form.
  
   - The prior distribution for $\mu$ is not explicitly coded: it takes an improper uniform distribution given $\tau$ (see BDA5.15), which is the default for unspecified parameters in Stan.
-  
-
- 
- 
- 
-
 
 ```
 model {
