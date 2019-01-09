@@ -1,0 +1,162 @@
+---
+title: "Fitting a logistic regression model with Rstan"
+author: "Georgia Tsambos"
+date: "09/01/2019"
+header-includes: \usepackage{bbm}
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intro
+
+I'm going to attempt to fit a logistic regression model to one of the ACTN3 studies *(Yang 2003)* using RStan.
+
+The dataset is as follows:
+
+|              | **RR**  | **RX**  | **XX** | *Total* |
+|--------------|---------|---------|--------|---------|
+| **Athletes** | 53      | 48      | 6      | *107*   |
+| **Controls** | 130     | 226     | 80     | *436*   |
+| *Total*      | *183*   | *274*   | *86*   | *543*   |
+
+## The Rstan model
+
+To design the rstan model for this dataset, let's consider what we know about it and the analysis we wish to perform.
+
+Firstly, we have an equation for the regression to perform:
+
+\[
+\mathrm{logit}(p_{i}) = 
+\log \left( \dfrac{P(\mathrm{athlete}\mid G_{i})}{P(\mathrm{control}\mid G_{i})} \right)\tag{1} = 
+\mu + \beta G_{i} + \gamma \cdot I(G_{i} = 1)
+\]
+
+The parameters of interest that we wish to estimate are the regression coefficients $\mu, \beta, \gamma$.
+
+Thus we have RStan chunk
+```
+parameters {
+  real mu;        \\ baseline odds of being an athlete
+  real beta;      \\ additive effect
+  real gamma;     \\ dominance effect
+}
+```
+Each of the $n=543$ individuals in the study is associated with a known predictor variable $g_i \in \{ XX=0,\thinspace RX=1,\thinspace RR=2\}$ and a known case/control status $y_i \in \{ \mathrm{athlete}=1, \mathrm{control=0} \}$ for $i=1,\ldots,n$.
+
+These all enter the RStan code as `data`:
+```
+data {
+  int<lower=0> N;               \\ number of individuals
+  int<lower=0,upper=2> g[N];    \\ genotype
+  int<lower=0,upper=1> y[N];    \\ case-control status
+}
+```
+Note that the second predictor in equation (1), $I(G_1 = 1)$, is just a function of the genotype $G_i$:
+
+\[
+I(G_1 = 1)
+=
+\begin{cases}
+1 &\mathrm{if}\quad G_1 = 1\\
+0 & \mathrm{otherwise.}
+\end{cases}\tag{2}
+\]
+
+The key outcome for each individual $i$ is $p_i = P(\mathrm{athlete}\mid G_{i})$. This is also just a function of equation (1):
+
+\[
+p_i = \mathrm{logit}^{-1} \left( \mu + \beta G_i + \gamma\cdot I(G_i=1)  \right)\tag{3}
+\]
+
+These enter RStan in the `transformed parameters` chunk:
+```
+transformed parameters {
+  for (n in 1:N) {      \\ the indicator variable
+    if (g[n] == 1)
+      ind[n] = 1;
+    else
+      ind[n] = 0;
+  }
+  vector[N] p = inv_logit(mu + beta * g + gamma * ...);
+}
+```
+The actual case-control status $y_i$ of individual $i$ is a realisation of a Bernoulli random variable with probability $p_i$. 
+\[
+Y_i \sim \mathrm{Bernoulli}(p_i)\tag{4}
+\]
+]
+For the moment, we'll specify a weakly informative uniform prior on $\mu$, which won't require an explicit prior specified.
+
+We'll specify a very general multivariate normal prior for $\beta, \gamma$ based on a normal distribution (this will be more meaningful when we extend to a meta-analysis involving more than one study!)
+\[
+\begin{bmatrix}
+\beta \\ \gamma
+\end{bmatrix} \sim
+N \left(
+\begin{bmatrix}
+\beta_0, \gamma_0
+\end{bmatrix}, \thinspace
+\begin{bmatrix}
+\tau_\beta^2 & \rho \tau_\beta \tau_\gamma \\
+\rho \tau_\beta \tau_\gamma & \tau_\gamma^2
+\end{bmatrix}
+\right)\tag{5}
+\]
+
+```
+model {
+  y ~ bernoulli_logit(p);
+  vector[2] coeffs = [ beta, gamma ]';
+  vector[2] coeffs0 = [ beta0, gamma0 ]';
+  matrix[2,2] sigma = [ [ taubeta*taubeta, rho*taubeta*taugamma ], [ rho*taubeta*taugamma, taugamma*taugamma ] ]
+  coeffs ~ multi_normal(coeffs0, sigma)
+}
+```
+
+Note that this introduces new hyperparameters $\beta_0, \gamma_0, \tau_\beta, \tau_\gamma, \rho$ (these will be more meaningful later with the full meta-analysis!) These should be added to the `parameter` chunk:
+```
+parameters {
+  real mu;        \\ baseline odds of being an athlete
+  real beta;      \\ additive effect
+  real gamma;     \\ dominance effect
+  \\ hyperparameters:
+  real beta0;
+  real gamma0;
+  real<lower=0> taubeta;
+  real<lower=0> taugamma;
+  real<lower=-1,upper=1> rho;
+}
+```
+As we are assuming the default weakly informative uniform prior on $\mu$, this distribution need not be specified in the script.
+
+### The full RStan model
+
+```
+data {
+  int<lower=0> N;               \\ number of individuals
+  int<lower=0,upper=2> g[N];    \\ genotype
+  int<lower=0,upper=1> y[N];    \\ case-control status
+}
+parameters {
+  real mu;        \\ baseline odds of being an athlete
+  real beta;      \\ additive effect
+  real gamma;     \\ dominance effect
+  \\ hyperparameters:
+  real beta0;
+  real gamma0;
+  real<lower=0> taubeta;
+  real<lower=0> taugamma;
+  real<lower=-1,upper=1> rho;
+}
+model {
+  y ~ bernoulli_logit(p);
+  vector[2] coeffs = [ beta, gamma ]';
+  vector[2] coeffs0 = [ beta0, gamma0 ]';
+  matrix[2,2] sigma = [ [ taubeta*taubeta, rho*taubeta*taugamma ], [ rho*taubeta*taugamma, taugamma*taugamma ] ]
+  coeffs ~ multi_normal(coeffs0, sigma)
+}
+```
+
