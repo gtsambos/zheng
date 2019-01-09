@@ -39,9 +39,9 @@ The parameters of interest that we wish to estimate are the regression coefficie
 Thus we have RStan chunk
 ```
 parameters {
-  real mu;        \\ baseline odds of being an athlete
-  real beta;      \\ additive effect
-  real gamma;     \\ dominance effect
+  real mu;        // baseline odds of being an athlete
+  real beta;      // additive effect
+  real gamma;     // dominance effect
 }
 ```
 Each of the $n=543$ individuals in the study is associated with a known predictor variable $g_i \in \{ XX=0,\thinspace RX=1,\thinspace RR=2\}$ and a known case/control status $y_i \in \{ \mathrm{athlete}=1, \mathrm{control=0} \}$ for $i=1,\ldots,n$.
@@ -49,9 +49,9 @@ Each of the $n=543$ individuals in the study is associated with a known predicto
 These all enter the RStan code as `data`:
 ```
 data {
-  int<lower=0> N;               \\ number of individuals
-  int<lower=0,upper=2> g[N];    \\ genotype
-  int<lower=0,upper=1> y[N];    \\ case-control status
+  int<lower=0> N;               // number of individuals
+  int<lower=0,upper=2> g[N];    // genotype
+  int<lower=0,upper=1> y[N];    // case-control status
 }
 ```
 Note that the second predictor in equation (1), $I(G_1 = 1)$, is just a function of the genotype $G_i$:
@@ -74,13 +74,13 @@ p_i = \mathrm{logit}^{-1} \left( \mu + \beta G_i + \gamma\cdot I(G_i=1)  \right)
 These enter RStan in the `transformed parameters` chunk:
 ```
 transformed parameters {
-  for (n in 1:N) {      \\ the indicator variable
+  for (n in 1:N) {      // the indicator variable
     if (g[n] == 1)
       ind[n] = 1;
     else
       ind[n] = 0;
   }
-  vector[N] p = inv_logit(mu + beta * g + gamma * ...);
+  vector[N] p = inv_logit(mu + beta * g + gamma * ind);
 }
 ```
 The actual case-control status $y_i$ of individual $i$ is a realisation of a Bernoulli random variable with probability $p_i$. 
@@ -119,9 +119,9 @@ model {
 Note that this introduces new hyperparameters $\beta_0, \gamma_0, \tau_\beta, \tau_\gamma, \rho$ (these will be more meaningful later with the full meta-analysis!) These should be added to the `parameter` chunk:
 ```
 parameters {
-  real mu;        \\ baseline odds of being an athlete
-  real beta;      \\ additive effect
-  real gamma;     \\ dominance effect
+  real mu;        // baseline odds of being an athlete
+  real beta;      // additive effect
+  real gamma;     // dominance effect
   \\ hyperparameters:
   real beta0;
   real gamma0;
@@ -134,22 +134,33 @@ As we are assuming the default weakly informative uniform prior on $\mu$, this d
 
 ### The full RStan model
 
+I save this in a script called `01.single-logit-model.stan`.
+
 ```
 data {
-  int<lower=0> N;               \\ number of individuals
-  int<lower=0,upper=2> g[N];    \\ genotype
-  int<lower=0,upper=1> y[N];    \\ case-control status
+  int<lower=0> N;               // number of individuals
+  int<lower=0,upper=2> g[N];    // genotype
+  int<lower=0,upper=1> y[N];    // case-control status
 }
 parameters {
-  real mu;        \\ baseline odds of being an athlete
-  real beta;      \\ additive effect
-  real gamma;     \\ dominance effect
+  real mu;        // baseline odds of being an athlete
+  real beta;      // additive effect
+  real gamma;     // dominance effect
   \\ hyperparameters:
   real beta0;
   real gamma0;
   real<lower=0> taubeta;
   real<lower=0> taugamma;
   real<lower=-1,upper=1> rho;
+}
+transformed parameters {
+  for (n in 1:N) {      // the indicator variable
+    if (g[n] == 1)
+      ind[n] = 1;
+    else
+      ind[n] = 0;
+  }
+  vector[N] p = inv_logit(mu + beta * g + gamma * ind);
 }
 model {
   y ~ bernoulli_logit(p);
@@ -160,3 +171,108 @@ model {
 }
 ```
 
+## Fitting the model in R
+
+First, we need to load RStan. I also enable parallel processing since I'm working on my own computer (for now).
+
+```{r loadpackages, echo = T, results = 'hide'}
+library(rstan, quietly = T)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+```
+
+Next, let's enter the data. 
+We could have set up the model above in a way that allows us to enter the totals, rather than just each individual separately.
+Let's maybe explore that later.
+
+I'll enter the data in the columns going across rows left to right, then down columns:
+
+```{r defineData, echo = T, results = 'hide'}
+# Number of study individuals
+N <- 543
+
+# Case control status
+y <- c(rep(1, 107), rep(0, 436))
+
+# Genotype
+g <- c(rep(0, 53), rep(1, 48), rep(2, 6), rep(0, 130), rep(1, 226), rep(2, 80))
+
+# Indicator status
+ind <- sapply(g, function(x) abs(x - 1))
+```
+
+Let's first fit a regular glm to this
+
+```{r glmFit}
+fit0_data <- data.frame(phenotype = y, additive = g, dominance = ind)
+fit0 <- glm(phenotype ~ additive + dominance, data = fit0_data, family = 'binomial')
+summary(fit0)
+```
+As expected from a quick visual 'look' at the data, there is a negative association between the X allele and the probability of being an athlete. The dominance coefficient is negative (suggesting recessiveness), though insignificant.
+
+Next, let's fit the Stan model using the following (simplified) model:
+```
+data {
+  int<lower=0> N;               // number of individuals
+  vector[N] g;    // genotype
+  int<lower=0,upper=1> y[N];    // case/control status
+  vector[N] ind;  // indicator for heterozygotes
+}
+parameters {
+  real mu;        // baseline odds of being an athlete
+  real beta;      // additive effect
+  real gamma;     // dominance effect
+}
+transformed parameters {
+  vector[N] p = mu + beta * g + gamma * ind;
+}
+model {
+  y ~ bernoulli_logit(p);
+}
+
+```
+
+```{r modelfit}
+study_data <- list(N=N, g=g, y=y, ind=ind)
+fit <- stan(file = '01.single-logit-model.stan', data = study_data)
+```
+
+Let's examine this object.
+```{r examineFit}
+print(fit)
+```
+
+First observation from this is: defining `p` as a `parameter` is a bad idea, because then the model attempts to fit each of these separately and there's a degrees of freedom problem. We can get around this with the followin?
+```
+data {
+  int<lower=0> N;               // number of individuals
+  vector[N] g;    // genotype
+  int<lower=0,upper=1> y[N];    // case/control status
+  vector[N] ind;  // indicator for heterozygotes
+}
+parameters {
+  real mu;        // baseline odds of being an athlete
+  real beta;      // additive effect
+  real gamma;     // dominance effect
+}
+model {
+  y ~ bernoulli_logit(mu + beta * g + gamma * ind);
+}
+
+```
+
+Let's try again.
+
+
+```{r modelfit1}
+study_data <- list(N=N, g=g, y=y, ind=ind)
+fit <- stan(file = '01.single-logit-model.stan', data = study_data)
+```
+
+Let's examine this object.
+```{r examineFit1}
+print(fit)
+```
+Note that these estimates are pretty similar to those obtained by `glm()`. Yay!
+
+Next, let's try to fit the slightly more complicated model where there are hyperparameters governing the distributions of $\beta, \gamma$.
