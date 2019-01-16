@@ -41,19 +41,19 @@ These datasets can be coded in `R` as follows.
 
 ```{r datasets, echo=T, results='hide'}
 
-% Study 1
+# Study 1
 N1 <- 543
 y1 <- c(rep(1, 107), rep(0, 436))
 g1 <- c(rep(0, 53), rep(1, 48), rep(2, 6), rep(0, 130), rep(1, 226), rep(2, 80))
 ind1 <- sapply(g1, function(x) abs(x - 1))
 
-% Study 2
+# Study 2
 N2 <- 221
 y2 <- c(rep(1, 101), rep(0, 120))
 g2 <- c(rep(0, 47), rep(1, 48), rep(2, 6), rep(0, 54), rep(1, 55), rep(2, 11))
 ind2 <- sapply(g2, function(x) abs(x - 1))
 
-% Study 3
+# Study 3
 N3 <- 254
 y3 <- c(rep(1, 73), rep(0, 181))
 g3 <- c(rep(0, 35), rep(1, 26), rep(2, 12), rep(0, 47), rep(1, 101), rep(2, 33))
@@ -184,3 +184,11 @@ print(fit2)
 oh yeah!
 
 Next step will be to vectorise this code to make it less unwieldy (and so it generalises to any number of studies!)
+
+Next, let's try a simple version that looks more like Zheng's existing code:
+
+```{r modelfit4}
+study_data <- list(N=c(N1, N2), G1=g1, G2=g2, Y1=y1, Y2=y2, 
+                   I1=ind1, I2=ind2)
+fit4 <- stan(file = '02.multiple-logit-models-4.stan', data=study_data)
+```
