@@ -1,0 +1,205 @@
+---
+title: "Fitting a meta-analysis with Rstan"
+author: "Georgia Tsambos"
+date: "31/01/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## The datasets
+
+### The raw data
+```{r raw-data}
+library(readr)
+ms <- read_csv("~/Projects/zheng/MS.csv")
+print(ms)
+```
+
+We therefore have 3 studies:
+
+#### Study 1: UK
+
+|              | **AA**  | **AG**  | **GG** | *Total* |
+|--------------|---------|---------|--------|---------|
+| **Cases**    | 380     | 913     | 560    | *1853*  |
+| **Controls** | 583     | 1312    | 779    | *2674*  |
+| *Total*      | *963*   | *2225*  | *1339* | *4527*  |
+
+
+#### Study 2: Sweden
+
+|              | **RR**  | **RX**  | **XX** | *Total* |
+|--------------|---------|---------|--------|---------|
+| **Cases**    | 158     | 329     | 198    | *685*   |
+| **Controls** | 117     | 271     | 139    | *527*   |
+| *Total*      | *275*   | *600*   | *337*  | *1212*  |
+
+
+#### Study 3: Europe
+
+|              | **RR**  | **RX**  | **XX** | *Total* |
+|--------------|---------|---------|--------|---------|
+| **Cases**    | 747     | 1843    | 1237   | *3827*  |
+| **Controls** | 545     | 1248    | 708    | *2501*  |
+| *Total*      | *1292*  | *3091*  | *1245* | *5788*  |
+
+These datasets can be coded in `R` as follows.
+
+```{r datasets, echo=T, results='hide'}
+
+# Study 1
+N1 <- 4527
+y1 <- c(rep(1, 1853), rep(0, 2674))
+g1 <- c(rep(0, 380), rep(1, 913), rep(2, 560), rep(0, 583), rep(1, 1312), rep(2, 779))
+ind1 <- sapply(g1, function(x) abs(x - 1))
+
+# Study 2
+N2 <- 1212
+y2 <- c(rep(1, 685), rep(0, 527))
+g2 <- c(rep(0, 158), rep(1, 329), rep(2, 198), rep(0, 117), rep(1, 271), rep(2, 139))
+ind2 <- sapply(g2, function(x) abs(x - 1))
+
+# Study 3
+N3 <- 6328
+y3 <- c(rep(1, 3827), rep(0, 2501))
+g3 <- c(rep(0, 747), rep(1, 1843), rep(2, 1237), rep(0, 545), rep(1, 1248), rep(2, 708))
+ind3 <- sapply(g3, function(x) abs(x - 1))
+```
+
+
+## First pass at an RStan model
+
+First, we need to load RStan. I also enable parallel processing since I'm working on my own computer (for now).
+
+```{r loadpackages, echo = T, results = 'hide'}
+library(rstan, quietly = T)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+```
+
+Only the default weakly informative priors are used.
+```
+data {
+  int<lower=0> N1;               // number of individuals in study 1
+  int<lower=0> N2;               // number of individuals in study 2
+  int<lower=0> N3;               // number of individuals in study 3
+  vector[N1] g1;    // genotypes in study 1
+  vector[N2] g2;    // genotypes in study 2
+  vector[N3] g3;    // genotypes in study 3
+  int<lower=0,upper=1> y1[N1];    // case/control status in study 1
+  int<lower=0,upper=1> y2[N2];    // case/control status in study 2
+  int<lower=0,upper=1> y3[N3];    // case/control status in study 3
+  vector[N1] ind1;  // indicator for heterozygotes in study 1
+  vector[N2] ind2;  // indicator for heterozygotes in study 2
+  vector[N3] ind3;  // indicator for heterozygotes in study 3
+}
+parameters {
+  real mu1;        // baseline odds of being an athlete in study 1
+  real mu2;        // baseline odds of being an athlete in study 2
+  real mu3;        // baseline odds of being an athlete in study 3
+  real beta1;      // additive effect in study 1
+  real beta2;      // additive effect in study 2
+  real beta3;      // additive effect in study 3
+  real gamma1;     // dominance effect in study 1
+  real gamma2;     // dominance effect in study 2
+  real gamma3;     // dominance effect in study 3
+}
+model {
+  y1 ~ bernoulli_logit(mu1 + beta1 * g1 + gamma1 * ind1); # likelihood model for study 1
+  y2 ~ bernoulli_logit(mu2 + beta2 * g2 + gamma2 * ind2); # likelihood model for study 2
+  y3 ~ bernoulli_logit(mu3 + beta3 * g3 + gamma3 * ind3); # likelihood model for study 3
+}
+```
+Let's fit these.
+```{r modelfit}
+study_data <- list(N1=N1, g1=g1, y1=y1, ind1=ind1,
+                   N2=N2, g2=g2, y2=y2, ind2=ind2,
+                   N3=N3, g3=g3, y3=y3, ind3=ind3)
+fit <- stan(file = '02.multiple-logit-models-1.stan', data = study_data)
+```
+Let's examine this object.
+```{r examineFit}
+print(fit)
+```
+
+Looks like this worked fine.
+Next, let's add in the prior distributions on $\beta_i, \gamma_i$:
+
+```
+data {
+  int<lower=0> N1;               // number of individuals in study 1
+  int<lower=0> N2;               // number of individuals in study 2
+  int<lower=0> N3;               // number of individuals in study 3
+  vector[N1] g1;    // genotypes in study 1
+  vector[N2] g2;    // genotypes in study 2
+  vector[N3] g3;    // genotypes in study 3
+  int<lower=0,upper=1> y1[N1];    // case/control status in study 1
+  int<lower=0,upper=1> y2[N2];    // case/control status in study 2
+  int<lower=0,upper=1> y3[N3];    // case/control status in study 3
+  vector[N1] ind1;  // indicator for heterozygotes in study 1
+  vector[N2] ind2;  // indicator for heterozygotes in study 2
+  vector[N3] ind3;  // indicator for heterozygotes in study 3
+}
+parameters {
+  real mu1;        // baseline odds of being an athlete in study 1
+  real mu2;        // baseline odds of being an athlete in study 2
+  real mu3;        // baseline odds of being an athlete in study 3
+  real beta1;      // additive effect in study 1
+  real beta2;      // additive effect in study 2
+  real beta3;      // additive effect in study 3
+  real gamma1;     // dominance effect in study 1
+  real gamma2;     // dominance effect in study 2
+  real gamma3;     // dominance effect in study 3
+  // hyperparameters:
+  real beta0;
+  real gamma0;
+  real<lower=0> taubeta;
+  real<lower=0> taugamma;
+  real<lower=-1,upper=1> rho;
+}
+model {
+  y1 ~ bernoulli_logit(mu1 + beta1 * g1 + gamma1 * ind1); # likelihood model for study 1
+  y2 ~ bernoulli_logit(mu2 + beta2 * g2 + gamma2 * ind2); # likelihood model for study 2
+  y3 ~ bernoulli_logit(mu3 + beta3 * g3 + gamma3 * ind3); # likelihood model for study 3
+  {
+    vector[2] coeffs1 = [ beta1, gamma1 ]';
+    vector[2] coeffs2 = [ beta2, gamma2 ]';
+    vector[2] coeffs3 = [ beta3, gamma3 ]';
+    vector[2] coeffs0 = [ beta0, gamma0 ]';
+    matrix[2,2] sigma = [ [ taubeta*taubeta, rho*taubeta*taugamma ], [ rho*taubeta*taugamma,  taugamma*taugamma ] ];
+    coeffs1 ~ multi_normal(coeffs0, sigma);
+    coeffs2 ~ multi_normal(coeffs0, sigma);
+    coeffs3 ~ multi_normal(coeffs0, sigma);
+  }
+}
+
+```
+I save this in a file called `02.multiple-logit-models-2.stan`.
+
+Let's fit it.
+```{r modelfit2}
+study_data <- list(N1=N1, g1=g1, y1=y1, ind1=ind1,
+                   N2=N2, g2=g2, y2=y2, ind2=ind2,
+                   N3=N3, g3=g3, y3=y3, ind3=ind3)
+fit2 <- stan(file = '02.multiple-logit-models-2.stan', data = study_data)
+```
+Let's examine this object.
+```{r examineFit2}
+print(fit2)
+```
+oh yeah!
+
+Next step might be to vectorise this code to make it less unwieldy (and so it generalises to any number of studies!)
+
+<!-- Next, let's try a simple version that looks more like Zheng's existing code: -->
+
+<!-- ```{r modelfit4} -->
+<!-- study_data <- list(N=c(N1, N2), G1=g1, G2=g2, Y1=y1, Y2=y2,  -->
+<!--                    I1=ind1, I2=ind2) -->
+<!-- fit4 <- stan(file = '02.multiple-logit-models-4.stan', data=study_data) -->
+<!-- ``` -->
